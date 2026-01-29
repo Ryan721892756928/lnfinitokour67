@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>InfinitoKour – Infinite Parkour</title>
+<style>
+body {
+    margin: 0;
+    overflow: hidden;
+    background: linear-gradient(#7ec8ff,#bfe9ff);
+}
+canvas { display: block; }
+.ui {
+    position: absolute;
+    left: 10px;
+    font-family: Arial;
+    color: white;
+    text-shadow: 2px 2px 4px black;
+}
+#score { top: 10px; font-size: 22px; }
+#combo { top: 40px; }
+#time { top: 65px; }
+#elytra { top: 90px; }
+#rockets { top: 115px; }
+#health { top: 140px; }
+#shop { top: 180px; }
+.shop-btn {
+    background: rgba(0,0,0,0.5);
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    margin-right: 5px;
+    cursor: pointer;
+    font-weight: bold;
+    border-radius: 5px;
+}
+.shop-btn:hover { background: rgba(0,0,0,0.8); }
+#homescreen {
+    position: absolute;
+    top:0; left:0;
+    width: 100%; height: 100%;
+    background: linear-gradient(#87CEEB,#bfe9ff);
+    display:flex; flex-direction:column;
+    justify-content:center; align-items:center;
+    color:white;
+    font-family: Arial;
+    z-index: 10;
+}
+#homescreen button {
+    margin:5px;
+    padding:10px 20px;
+    border:none;
+    border-radius:5px;
+    cursor:pointer;
+    background:#444;
+    color:white;
+}
+#homescreen button:hover { background:#666; }
+</style>
+</head>
+<body>
+<div id="homescreen">
+    <h1>InfinitoKour</h1>
+    <p>Kies je Bal kleur:</p>
+    <input type="color" id="ballColor" value="#ff4444">
+    <p>Kies je Juggernaut kleur:</p>
+    <input type="color" id="jugColor" value="#616161">
+    <p>Kies je skin:</p>
+    <select id="skinSelect">
+        <option value="red">Rood</option>
+        <option value="blue">Blauw</option>
+        <option value="green">Groen</option>
+        <option value="purple">Paars</option>
+    </select>
+    <button onclick="startGame()">Start Game</button>
+</div>
+
+<div class="ui" id="score"></div>
+<div class="ui" id="combo"></div>
+<div class="ui" id="time"></div>
+<div class="ui" id="elytra"></div>
+<div class="ui" id="rockets"></div>
+<div class="ui" id="health"></div>
+<div class="ui" id="shop">
+    <button class="shop-btn" onclick="buyUpgrade('rockets')">🚀 Rocket 5c</button>
+    <button class="shop-btn" onclick="buyUpgrade('machineGun')">MachineGun 50c</button>
+    <button class="shop-btn" onclick="buyUpgrade('juggernaut')">Juggernaut 500c</button>
+</div>
+
+<canvas id="c"></canvas>
+
+<script>
+const c=document.getElementById("c");
+const ctx=c.getContext("2d");
+c.width=innerWidth;
+c.height=innerHeight;
+
+// ===== CLOUDS & SUN =====
+let clouds=[];
+for(let i=0;i<15;i++){ clouds.push({x:Math.random()*3000,y:50+Math.random()*200,s:0.5+Math.random()*0.5}); }
+let sun={x:100,y:100,r:50};
+let gameStarted=false;
+
+function startGame(){
+    gameStarted=true;
+    document.getElementById("homescreen").style.display="none";
+    player.color=document.getElementById("ballColor").value;
+    upgrades.juggernaut.color=document.getElementById("jugColor").value;
+}
+
+// ===== GLOBAL =====
+const GRAVITY=0.8;
+let cameraX=0,cameraY=0,keys={},mouse={x:0,y:0,down:false};
+let startTime=Date.now();
+let score=0,combo=0,comboTimer=0,coins=0;
+let player={x:100,y:0,r:22,vx:0,vy:0,speed:7,jump:16,grounded:false,jumps:2,flying:false,hp:100,maxHp:100,reload:0,color:'#ff4444'};
+let rockets=5,elytraTime=0;
+let platforms=[],movingPlatforms=[],spikes=[],enemies=[],bullets=[],enemyBullets=[],particles=[],powerUps=[];
+
+// ===== PLATFORM =====
+class Platform{ constructor(x,y,w){this.x=x;this.y=y;this.w=w;this.h=22;} draw(){ctx.fillStyle='#3cb371';ctx.fillRect(this.x,this.y,this.w,this.h);} }
+
+// ===== MOVING PLATFORM =====
+class MovingPlatform{ constructor(x,y,w,range,speed){this.x=x;this.y=y;this.w=w;this.h=22;this.range=range;this.speed=speed;this.startX=x;this.dir=1;} update(){this.x+=this.speed*this.dir;if(this.x>this.startX+this.range||this.x<this.startX)this.dir*=-1;} draw(){ctx.fillStyle='#66cdaa';ctx.fillRect(this.x,this.y,this.w,this.h);} }
+
+// ===== SPIKES =====
+class Spike{ constructor(x,y,w){this.x=x;this.y=y;this.w=w||20;this.h=20;this.offset=Math.random()*10;} draw(){ctx.fillStyle='grey';ctx.beginPath();for(let i=0;i<this.w;i+=20){ctx.moveTo(this.x+i,this.y);ctx.lineTo(this.x+i+10,this.y-20-this.offset*Math.sin(Date.now()/200));ctx.lineTo(this.x+i+20,this.y);ctx.fill();}} }
+
+// ===== POWERUP =====
+class PowerUp{constructor(x,y,type){this.x=x;this.y=y;this.type=type;this.r=12;} draw(){ctx.fillStyle=this.type==="coin"?"gold":"cyan";ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);ctx.fill();}}
+
+// ===== ENEMY =====
+class Enemy{constructor(x,y,type){this.x=x;this.y=y;this.type=type;this.r=type===2?26:20;this.hp=type===2?6:type===1?2:3;this.reload=80;} update(){if(this.type===1)this.x+=Math.sign(player.x-this.x)*1.2;let dx=player.x-this.x,dy=player.y-this.y,dist=Math.hypot(dx,dy);if(dist<500&&this.reload--<=0){enemyBullets.push({x:this.x,y:this.y,vx:dx/dist*6,vy:dy/dist*6});this.reload=100;}} draw(){ctx.fillStyle=this.type===2?'#2e86de':this.type===1?'#e74c3c':'purple';ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);ctx.fill();}}
+
+// ===== UPGRADES =====
+let upgrades={rockets:{cost:5,amount:1},machineGun:{cost:50,active:false,duration:1200},juggernaut:{cost:500,active:false,resistance:0.5,color:'#616161'}};
+let machineGunTimer=0;
+function buyUpgrade(type){if(coins>=upgrades[type].cost){coins-=upgrades[type].cost;if(type==="rockets")rockets+=upgrades[type].amount;if(type==="machineGun")upgrades.machineGun.active=true;if(type==="juggernaut")upgrades.juggernaut.active=true;}}
+
+// ===== INIT PLATFORMS =====
+let lastX=0,lastY=c.height-150;
+platforms.push(new Platform(0,lastY,400));
+player.y=lastY-player.r*2;
+lastX=400;
+function genPlat(){
+    let gap=150+Math.random()*150;
+    let w=150+Math.random()*150;
+    let x=lastX+gap;
+    let y=lastY-(90+Math.random()*130);
+    if(Math.random()<0.2)movingPlatforms.push(new MovingPlatform(x,y,w,100,2));
+    else platforms.push(new Platform(x,y,w));
+    if(Math.random()<0.5){ let spikeCount=1+Math.floor(Math.random()*3); for(let i=0;i<spikeCount;i++){ let sx=x+Math.random()*w-30; spikes.push(new Spike(sx,y)); } }
+    if(Math.random()<0.25)powerUps.push(new PowerUp(x+w/2,y-25,Math.random()<0.5?"coin":"speed"));
+    if(Math.random()<0.3){ let t=Math.random()<0.3?2:Math.random()<0.5?1:0; enemies.push(new Enemy(x+w/2,y-50,t)); }
+    lastX=x+w;
+    lastY=y;
+}
+for(let i=0;i<12;i++)genPlat();
+
+// ===== INPUT =====
+addEventListener("keydown",e=>{if(!gameStarted)return;if(e.code==='Space'||e.code==='KeyW')jump();if(e.code==='KeyE'&&rockets>0){rockets--;elytraTime=180;}keys[e.code]=true;});
+addEventListener("keyup",e=>{if(!gameStarted)return;keys[e.code]=false;});
+addEventListener("mousemove",e=>{if(!gameStarted)return;mouse.x=e.clientX;mouse.y=e.clientY;});
+addEventListener("mousedown",()=>{if(!gameStarted)return;mouse.down=true;});
+addEventListener("mouseup",()=>{if(!gameStarted)return;mouse.down=false;});
+
+function jump(){if(player.flying)return;if(player.grounded){player.vy=-player.jump;player.jumps=1;}else if(player.jumps>0){player.vy=-player.jump;player.jumps--; }}
+
+// ===== SCORE =====
+let lastScoreX=player.x;
+function updateScoreDistance(){let dx=player.x-lastScoreX;if(dx>0){score+=Math.floor(dx*0.5);lastScoreX=player.x;}}
+
+// ===== UPDATE =====
+function update(){
+// … hier komt de rest van je update/draw code (zelfde als jij had)
+}
+
+// ===== DRAW =====
+function draw(){
+// … hier komt de rest van je draw code (zelfde als jij had)
+}
+
+function loop(){update();draw();requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>
+
+
+
+
